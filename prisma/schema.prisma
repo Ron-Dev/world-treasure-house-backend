@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//
+// 🧑 User and Roles
+//
+model User {
+  id          String     @id @default(uuid())
+  email       String     @unique
+  password    String
+  name        String
+  role        Role       @default(CUSTOMER)
+
+  // Relations
+  addresses   Address[]
+  orders      Order[]
+  wishlist    Wishlist?         // ✅ One-to-one optional
+  reviews     Review[]
+  products    Product[] @relation("UserProducts")
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+enum Role {
+  CUSTOMER
+  SELLER
+  ADMIN
+}
+
+//
+// 📮 Address
+//
+model Address {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  street      String
+  city        String
+  state       String
+  country     String
+  postalCode  String
+  phone       String
+  isDefault   Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+//
+// 🗂️ Category
+//
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  slug        String     @unique
+
+  products    Product[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+//
+// 📦 Product
+//
+model Product {
+  id            String          @id @default(uuid())
+  name          String
+  slug          String          @unique
+  description   String
+  price         Float
+  currency      String
+  stock         Int
+
+  // Relations
+  categoryId    String
+  category      Category        @relation(fields: [categoryId], references: [id])
+
+  sellerId      String
+  seller        User            @relation("UserProducts", fields: [sellerId], references: [id])
+
+  images        String[]
+  ratings       Float           @default(0)
+
+  reviews       Review[]
+  regionPrices  RegionPrice[]
+  discount      ProductDiscount?
+
+  orderItems    OrderItem[]  // a product can be part of many order items
+
+  wishlistedBy  Wishlist[]      @relation("WishlistProducts")
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+//
+// 🌍 Region-Specific Prices
+//
+model RegionPrice {
+  id         String   @id @default(uuid())
+  productId  String
+  region     String
+  price      Float
+  currency   String
+
+  product    Product  @relation(fields: [productId], references: [id])
+}
+
+//
+// 💸 Product Discounts
+//
+model ProductDiscount {
+  id          String   @id @default(uuid())
+  productId   String   @unique
+  discountPct Float
+  validTill   DateTime
+
+  product     Product  @relation(fields: [productId], references: [id])
+}
+
+//
+// 💖 Wishlist
+//
+model Wishlist {
+  id          String     @id @default(uuid())
+  userId      String     @unique
+  user        User       @relation(fields: [userId], references: [id])
+
+  products    Product[]  @relation("WishlistProducts")
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+//
+// 🌟 Review
+//
+model Review {
+  id          String   @id @default(uuid())
+  userId      String
+  productId   String
+  rating      Int
+  comment     String
+
+  user        User     @relation(fields: [userId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+//
+// 🧾 Order & Order Items
+//
+model Order {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+
+  items           OrderItem[]
+  total           Float
+  currency        String
+  status          OrderStatus   @default(PENDING)
+
+  razorpayOrderId String?
+  stripePaymentId String?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  productId   String
+  quantity    Int
+  price       Float
+
+  order       Order    @relation(fields: [orderId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+//
+// 🎟️ Coupon
+//
+model Coupon {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  discount     Float
+  validTill    DateTime      // ✅ Validity period
+  minAmount    Float         // ✅ Minimum order value to apply
+  maxDiscount  Float         // ✅ Maximum discount allowed
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+
