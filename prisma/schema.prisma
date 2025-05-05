@@ -22,6 +22,7 @@ model User {
   password    String
   name        String
   role        Role       @default(CUSTOMER)
+  refreshToken String? // Add this field for refresh token storage
 
   // Relations
   addresses   Address[]
