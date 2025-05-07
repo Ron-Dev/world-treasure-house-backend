@@ -13,6 +13,7 @@ import { OrderModule } from './order/order.module';
 import { CouponModule } from './coupon/coupon.module';
 import { ReviewModule } from './review/review.module';
 import { OrderItemModule } from './order-item/order-item.module';
+import { CartModule } from './cart/cart.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { OrderItemModule } from './order-item/order-item.module';
     CouponModule,
     ReviewModule,
     OrderItemModule,
+    CartModule,
   ],
   controllers: [AppController],
   providers: [AppService],
