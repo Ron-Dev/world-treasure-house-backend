@@ -1,58 +1,84 @@
-// checkout.service.ts
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+// src/modules/checkout/checkout.service.ts
+
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CheckoutDto } from './dto/checkout.dto';
+import Razorpay from 'razorpay';
+import Stripe from 'stripe';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class CheckoutService {
-  constructor(private readonly prisma: PrismaService) {}
+  private razorpay: Razorpay;
+  private stripe: Stripe;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {
+    this.razorpay = new Razorpay({
+      key_id: this.config.get<string>('RAZORPAY_KEY_ID'),
+      key_secret: this.config.get<string>('RAZORPAY_KEY_SECRET'),
+    });
+
+    const stripeSecretKey = this.config.get<string>('STRIPE_SECRET_KEY');
+
+    if (!stripeSecretKey) {
+      throw new Error('STRIPE_SECRET_KEY is not defined in the environment');
+    }
+
+    this.stripe = new Stripe(stripeSecretKey, {
+      apiVersion: '2025-04-30.basil',
+    });
+  }
 
   async checkout(userId: string, dto: CheckoutDto) {
-    // 1. Get user's cart with items
+    // Get user cart
     const cart = await this.prisma.cart.findUnique({
       where: { userId },
       include: {
         items: {
-          include: { product: true },
+          include: {
+            product: true,
+          },
         },
       },
     });
 
     if (!cart || cart.items.length === 0) {
-      throw new BadRequestException('Your cart is empty.');
+      throw new BadRequestException('Cart is empty');
     }
 
-    // 2. Verify address belongs to user
+    // Validate address
     const address = await this.prisma.address.findFirst({
-      where: {
-        id: dto.addressId,
-        userId,
-      },
+      where: { id: dto.addressId, userId },
     });
-
     if (!address) {
-      throw new NotFoundException('Address not found.');
+      throw new NotFoundException('Address not found');
     }
 
-    // 3. Check stock for each item
+    // Check stock availability
     for (const item of cart.items) {
       if (item.quantity > item.product.stock) {
-        throw new BadRequestException(`Insufficient stock for product: ${item.product.name}`);
+        throw new BadRequestException(`Insufficient stock for product ${item.product.name}`);
       }
     }
 
-    // 4. Calculate total
+    // Calculate total
     let total = 0;
+    const currency = cart.items[0].product.currency;
+
     for (const item of cart.items) {
       total += item.product.price * item.quantity;
     }
 
-    // 5. Create Order with nested OrderItems
+    // Create order (status: PENDING)
     const order = await this.prisma.order.create({
       data: {
         userId,
         total,
-        currency: cart.items[0].product.currency,
+        currency,
+        status: 'PENDING',
         items: {
           create: cart.items.map((item) => ({
             productId: item.productId,
@@ -61,29 +87,50 @@ export class CheckoutService {
           })),
         },
       },
-      include: {
-        items: true,
-      },
     });
 
-    // 6. Update product stock
-    const stockUpdates = cart.items.map((item) =>
-      this.prisma.product.update({
-        where: { id: item.productId },
-        data: { stock: { decrement: item.quantity } },
-      }),
-    );
-    await this.prisma.$transaction(stockUpdates);
+    // Payment initiation
+    if (currency === 'INR') {
+      const razorpayOrder = await this.razorpay.orders.create({
+        amount: Math.round(total * 100),
+        currency: 'INR',
+        receipt: order.id,
+      });
 
-    // 7. Clear the cart
-    await this.prisma.cartItem.deleteMany({
-      where: { cartId: cart.id },
-    });
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { razorpayOrderId: razorpayOrder.id },
+      });
 
-    return {
-      message: 'Order placed successfully.',
-      orderId: order.id,
-      total,
-    };
+      return {
+        paymentGateway: 'razorpay',
+        orderId: order.id,
+        razorpayOrderId: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+      };
+    } else {
+      const paymentIntent = await this.stripe.paymentIntents.create({
+        amount: Math.round(total * 100),
+        currency,
+        metadata: {
+          orderId: order.id,
+          userId,
+        },
+      });
+
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { stripePaymentId: paymentIntent.id },
+      });
+
+      return {
+        paymentGateway: 'stripe',
+        orderId: order.id,
+        clientSecret: paymentIntent.client_secret,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency,
+      };
+    }
   }
 }

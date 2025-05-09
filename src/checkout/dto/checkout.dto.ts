@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CheckoutDto {
@@ -7,8 +7,8 @@ export class CheckoutDto {
   @IsUUID()
   addressId: string;
 
-  @ApiProperty({ description: 'Optional coupon code', required: false })
+  @ApiProperty({ enum: ['razorpay', 'stripe'], required: false })
   @IsOptional()
-  @IsString()
-  couponCode?: string;
+  @IsIn(['razorpay', 'stripe'])
+  preferredGateway?: 'razorpay' | 'stripe'; // for future use
 }
